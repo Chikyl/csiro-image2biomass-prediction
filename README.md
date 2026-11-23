@@ -1,4 +1,4 @@
-# Chaos of Ensembles: Pasture Biomass from Images
+# Pasture Biomass from Images
 
 A multi-model ensemble for the **CSIRO Image2Biomass Prediction** Kaggle competition. Given a photo of a pasture quadrat, the pipeline predicts five dry-mass targets (in grams). It blends **three very different model families** (a SigLIP-embedding + gradient-boosting stack, a DINOv3 ViT-Large regressor with FiLM fusion, and a DINOv3 ViT-Huge+ regressor with a Mamba-style fusion neck) and then enforces the biological mass-balance constraints between targets.
 
@@ -9,17 +9,14 @@ The repo also includes a clean **ConvNeXt-Tiny** baseline notebook as a simpler 
 ## Table of Contents
 
 - [Problem](#problem)
-- [Repository Structure](#repository-structure)
 - [Ensemble Architecture](#ensemble-architecture)
 - [Branch A: SigLIP Embeddings + Gradient Boosting](#branch-a-siglip-embeddings--gradient-boosting)
 - [Branch B: DINOv3 ViT-Large + FiLM Fusion](#branch-b-dinov3-vit-large--film-fusion)
 - [Branch C: DINOv3 ViT-Huge+ + Mamba-Style Fusion](#branch-c-dinov3-vit-huge--mamba-style-fusion)
-- [Blending and Mass-Balance Reconciliation](#blending-and-mass-balance-reconciliation)
+- [Blending and Mass-Balance](#blending)
 - [Evaluation Metric](#evaluation-metric)
 - [Results](#results)
-- [Baseline: ConvNeXt-Tiny](#baseline-convnext-tiny)
-- [Reproducing the Pipeline](#reproducing-the-pipeline)
-- [Design Notes](#design-notes)
+  
 
 ---
 
@@ -40,15 +37,6 @@ This is a **multi-output regression** problem with built-in physical constraints
 Each source image is wide (about 2000×1000). Every vision branch below splits it into **left and right halves** and processes each half separately.
 
 ---
-
-## Repository Structure
-
-```
-.
-├── chaos-of-ensembles.ipynb   # Main notebook: all three branches + blending (focus of this repo)
-├── csir0-convnexttiny.ipynb   # ConvNeXt-Tiny baseline (train + 5-fold inference)
-└── README.md
-```
 
 ### What `chaos-of-ensembles.ipynb` contains
 
@@ -287,51 +275,4 @@ The saved notebook outputs were run against Kaggle's one-image placeholder test 
 
 The final row is consistent by construction: `GDM = Green + Clover` and `Total = GDM + Dead`.
 
----
 
-## Baseline: ConvNeXt-Tiny
-
-`csir0-convnexttiny.ipynb` is a compact reference model that the ensemble branches build on conceptually (same left/right split and multi-head idea).
-
-| Aspect | Detail |
-|---|---|
-| Backbone | `convnext_tiny` (timm), classification head removed, 224×224 input |
-| Fusion | Left and right feature maps concatenated **channel-wise** (768×2), global-average pooled |
-| Trunk | `Linear(1536→256) → ReLU → Dropout(0.2) → Linear(256→64) → ReLU` |
-| Outputs | Three Softplus heads predicting **Green, GDM, Total**; Dead = Total − GDM and Clover = GDM − Green are derived |
-| Loss / optimizer | `SmoothL1Loss`, AdamW (lr 1e-4), cosine annealing, mixed precision |
-| Training | 5-fold `KFold` (seed 42), batch size 8, up to 50 epochs, early stopping (patience 8) |
-| Augmentation | Horizontal and vertical flips, light color jitter |
-| Inference | Average the best checkpoint from each of the 5 folds, clip at zero |
-
-Sample output for the placeholder test image: Green 23.61, GDM 24.09, Total 53.80, Dead 29.71, Clover 0.48.
-
----
-
-## Reproducing the Pipeline
-
-1. **Environment**: a Kaggle GPU notebook. Key libraries are `torch`, `timm` (recent enough to expose `*dinov3*` models), `transformers`, `albumentations`, `scikit-learn`, `lightgbm`, `catboost`, `opencv-python`, and `pandas`.
-2. **Inputs** (attached as Kaggle datasets):
-   - the competition data (`csiro-biomass`)
-   - the shared fold split CSV (`csiro_data_split.csv`)
-   - the SigLIP SO400M checkpoint
-   - the pretrained fold weights for Branch B and Branch C, plus the Huge+ backbone weights
-3. **Run `chaos-of-ensembles.ipynb` top to bottom.** Cells 0, 2, 13 produce the three branch submissions; cells 3 and 14 perform the two blending stages; the final file is `submission.csv`.
-4. To **retrain Branch C**, uncomment the training loop in cell 12 and set `EPOCHS` and `FOLDS_TO_TRAIN` in `CFG`.
-
----
-
-## Design Notes
-
-- **Why three families?** Embedding + trees, a fine-tuned ViT-L, and a fine-tuned ViT-Huge+ make different errors, which is where blending gains come from.
-- **Why max-scale the targets in Branch A?** It puts all targets on a comparable 0–1 range so shared hyperparameters behave consistently across targets.
-- **Why clover from one model only?** Clover is sparse and mostly near zero, so averaging a model that predicts exactly 0 with one that detects it would dilute the signal. The notebook uses the DINOv3 ViT-L branch for it, which is described there as the better detector.
-- **Derived-target handling.** In Branch B's script, `GDM_g` and `Dry_Total_g` are first computed from placeholder columns, so those two columns in `submission_dinov2026.csv` are not meaningful. This is harmless because the blending step recomputes both from `Green + Clover + Dead` before anything is written.
-- **Hard-coded post-processing constants** (0.09 noise floor, 0.8 clover scale, dead-mass multipliers) are tuned heuristics. They are worth re-validating against out-of-fold predictions whenever the underlying models change.
-- **Key naming in the second blend.** The stage-2 cell reuses the `siglip` / `dino` dictionary keys from stage 1. In stage 2 they actually point to the Branch C output (`submission70.csv`) and the stage-1 blend (`submission72.csv`), respectively.
-
----
-
-## Acknowledgements
-
-Built on the CSIRO Image2Biomass Prediction competition data, DINOv3 and SigLIP pretrained models, `timm`, and Hugging Face Transformers.
