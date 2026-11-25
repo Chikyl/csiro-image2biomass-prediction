@@ -253,13 +253,6 @@ Because `Dry_Total_g` dominates, the total-mass prediction (which sums the green
 
 ## Results
 
-| Model / Stage | Local CV (weighted R²) | Public LB |
-|---|---|---|
-| Branch A: SigLIP + boosting | _add_ | _add_ |
-| Branch B: DINOv3 ViT-L (FiLM) | _add_ | _add_ |
-| Branch C: DINOv3 ViT-Huge+ (Mamba) | _add_ | _add_ |
-| Stage-1 blend (A + B) | n/a | _add_ |
-| **Final blend (A + B + C)** | n/a | _add_ |
 
 ### Smoke test on the sample test image
 
